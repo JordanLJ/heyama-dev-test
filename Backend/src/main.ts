@@ -3,12 +3,18 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ensureDatabase } from './database.bootstrap';
 
+function corsOrigins(): string | string[] | boolean {
+  const raw = process.env.CORS_ORIGIN;
+  if (!raw || raw === '*') return true;
+  return raw.split(',').map((o) => o.trim()).filter(Boolean);
+}
+
 async function bootstrap() {
   await ensureDatabase();
 
   const app = await NestFactory.create(AppModule);
   app.enableCors({
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: corsOrigins(),
     credentials: true,
   });
   app.useGlobalPipes(
@@ -19,7 +25,7 @@ async function bootstrap() {
   );
 
   const port = process.env.PORT ? Number(process.env.PORT) : 3001;
-  await app.listen(port);
-  console.log(`API listening on http://localhost:${port}`);
+  await app.listen(port, '0.0.0.0');
+  console.log(`API listening on http://0.0.0.0:${port}`);
 }
 bootstrap();

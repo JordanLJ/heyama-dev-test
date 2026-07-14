@@ -1,9 +1,15 @@
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 
+function corsOrigins(): string | string[] | boolean {
+  const raw = process.env.CORS_ORIGIN;
+  if (!raw || raw === '*') return true;
+  return raw.split(',').map((o) => o.trim()).filter(Boolean);
+}
+
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: corsOrigins(),
     credentials: true,
   },
 })
