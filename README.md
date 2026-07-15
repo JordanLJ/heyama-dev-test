@@ -2,7 +2,7 @@
 
 Web-only full-stack app to manage a collection of **Objects** (title, description, image, createdAt).
 
-> Mobile (React Native / Expo) from the original brief was intentionally skipped to deliver a complete web stack (API + UI + realtime). The REST API is ready for a future Expo client.
+> Web stack (API + UI + realtime). The REST API is ready for a future Expo client.
 
 ## Stack
 
