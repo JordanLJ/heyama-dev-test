@@ -3,7 +3,13 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
+import {
+  Injectable,
+  Logger,
+  OnModuleInit,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -37,19 +43,28 @@ export class S3Service implements OnModuleInit {
     const endpoint = this.config.get<string>('S3_ENDPOINT');
     const accessKey = this.config.get<string>('S3_ACCESS_KEY');
     const secretKey = this.config.get<string>('S3_SECRET_KEY');
+    const region = this.config.get<string>('S3_REGION', 'us-east-1');
+    const forcePathStyle =
+      this.config.get<string>('S3_FORCE_PATH_STYLE', 'true') !== 'false';
 
-    if (endpoint && accessKey && secretKey) {
+    if (accessKey && secretKey) {
       this.client = new S3Client({
-        endpoint,
-        region: this.config.get<string>('S3_REGION', 'us-east-1'),
-        forcePathStyle: true,
+        ...(endpoint ? { endpoint } : {}),
+        region,
+        forcePathStyle,
         credentials: {
           accessKeyId: accessKey,
           secretAccessKey: secretKey,
         },
+        requestHandler: new NodeHttpHandler({
+          connectionTimeout: 8_000,
+          requestTimeout: 20_000,
+        }),
       });
       this.driver = 's3';
-      this.logger.log(`Using S3-compatible storage at ${endpoint}`);
+      this.logger.log(
+        `Using S3 storage bucket=${this.bucket} endpoint=${endpoint || 'AWS default'} pathStyle=${forcePathStyle}`,
+      );
       return;
     }
 
@@ -65,14 +80,22 @@ export class S3Service implements OnModuleInit {
     const key = `objects/${Date.now()}-${safeName}`;
 
     if (this.driver === 's3' && this.client) {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-          Body: file.buffer,
-          ContentType: file.mimetype,
-        }),
-      );
+      try {
+        await this.client.send(
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+            Body: file.buffer,
+            ContentType: file.mimetype,
+          }),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`S3 upload failed: ${message}`);
+        throw new ServiceUnavailableException(
+          `Image upload failed (S3/MinIO): ${message}`,
+        );
+      }
       return `${this.publicUrl.replace(/\/$/, '')}/${key}`;
     }
 
@@ -87,12 +110,17 @@ export class S3Service implements OnModuleInit {
     if (!key) return;
 
     if (this.driver === 's3' && this.client) {
-      await this.client.send(
-        new DeleteObjectCommand({
-          Bucket: this.bucket,
-          Key: key,
-        }),
-      );
+      try {
+        await this.client.send(
+          new DeleteObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+          }),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`S3 delete failed: ${message}`);
+      }
       return;
     }
 
@@ -102,6 +130,11 @@ export class S3Service implements OnModuleInit {
     } catch {
       this.logger.warn(`Could not delete local file: ${dest}`);
     }
+  }
+
+  /** Used by /health to verify storage connectivity. */
+  getDriver(): string {
+    return this.driver;
   }
 
   private extractKey(fileUrl: string): string | null {
